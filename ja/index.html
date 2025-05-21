@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>インタラクティブ WebAssembly パフォーマンス分析</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif; /* 日本語フォントの指定も検討 (例: 'Inter', 'Noto Sans JP', sans-serif) */
+        }
+        .content-section {
+            display: none;
+        }
+        .content-section.active {
+            display: block;
+        }
+        .nav-link {
+            @apply px-5 py-3 text-base font-semibold text-stone-600 hover:bg-sky-100 hover:text-sky-700 rounded-t-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-sky-500;
+        }
+        .nav-link.active {
+            @apply bg-sky-600 text-white border-b-4 border-sky-800 hover:bg-sky-700;
+        }
+        .card {
+            @apply bg-white p-6 rounded-lg shadow-lg hover:shadow-xl transition-shadow duration-300;
+        }
+        .card-title {
+            @apply text-xl font-semibold text-sky-700 mb-3;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 700px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 350px;
+            max-height: 400px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 400px;
+            }
+        }
+        .accordion-button {
+            @apply w-full text-left px-4 py-3 bg-stone-200 hover:bg-stone-300 rounded-t-md text-stone-800 font-semibold transition-colors duration-150 flex justify-between items-center;
+        }
+        .accordion-content {
+            @apply px-4 py-3 border border-t-0 border-stone-300 rounded-b-md bg-white;
+            display: none;
+        }
+        .table-container table {
+            @apply min-w-full divide-y divide-stone-300;
+        }
+        .table-container th {
+            @apply px-4 py-3.5 text-left text-sm font-semibold text-stone-900 bg-stone-100;
+        }
+        .table-container td {
+            @apply whitespace-nowrap px-4 py-3 text-sm text-stone-700;
+        }
+        .table-container tbody tr:nth-child(even) {
+            @apply bg-stone-50;
+        }
+        .tooltip {
+            @apply absolute z-10 invisible px-3 py-2 text-sm font-medium text-white bg-stone-900 rounded-md shadow-sm opacity-0 transition-opacity duration-300;
+        }
+        .has-tooltip:hover .tooltip {
+            @apply visible opacity-100;
+        }
+    </style>
+</head>
+<body class="bg-stone-100 text-stone-800">
+  <nav>
+    <a href="../ja/index.html">🇯🇵 日本語</a> | 
+    <a href="../en/index.html">🇺🇸 English</a>
+  </nav>
+    <header class="bg-white shadow-md sticky top-0 z-50">
+        <nav class="container mx-auto px-4 sm:px-6 lg:px-8 py-2 flex flex-wrap justify-center items-center space-x-1 sm:space-x-2">
+            <button data-section="overview" class="nav-link active">概要</button>
+            <button data-section="performance" class="nav-link">パフォーマンス詳細</button>
+            <button data-section="optimization" class="nav-link">最適化</button>
+            <button data-section="future" class="nav-link">Wasmの将来</button>
+            <button data-section="realworld" class="nav-link">実世界での応用</button>
+            <button data-section="takeaways" class="nav-link">主要なポイント</button>
+        </nav>
+    </header>
+
+    <main class="container mx-auto p-4 sm:p-6 lg:p-8">
+        <section id="overview" class="content-section active">
+            <h1 class="text-3xl sm:text-4xl font-bold text-sky-700 mb-6 text-center">WebAssembly: WebにおけるC++のためのパフォーマンスパス</h1>
+            <p class="text-lg text-stone-700 mb-8 text-center max-w-3xl mx-auto">
+                このインタラクティブレポートでは、Web上のC++アプリケーション向けの高性能コンパイルターゲットとしてのWebAssembly (Wasm) を探求し、その速度と機能をネイティブiOS実行と比較します。Wasmのコアコンセプト、パフォーマンス特性、最適化戦略、および将来の可能性をご覧ください。
+            </p>
+
+            <div class="grid md:grid-cols-2 gap-6 mb-8">
+                <div class="card">
+                    <h2 class="card-title">WebAssemblyとは？</h2>
+                    <p class="text-stone-600 mb-4">WebAssembly (Wasm) は、コンパクトなバイナリ形式を持つ低レベルのアセンブリ風言語です。Webブラウザで実行され、計算集約型のタスクに対してネイティブに近いパフォーマンスを実現します。WasmはJavaScriptを補完し、C++やRustなどの言語をWeb用にコンパイルできるようにします。</p>
+                    <p class="text-stone-600">その主な目標は、速度、安全性、移植性であり、複雑なデスクトップクラスのアプリケーションを効率的にWebにもたらすことを目指しています。</p>
+                </div>
+                <div class="card">
+                    <h2 class="card-title">Wasmのコアコンセプト</h2>
+                    <ul class="list-disc list-inside text-stone-600 space-y-2">
+                        <li><strong class="text-stone-700">モジュール:</strong> コンパイルされたWasmバイナリ。ステートレスで共有可能です。</li>
+                        <li><strong class="text-stone-700">メモリ:</strong> Wasmの線形メモリス空間を表す、サイズ変更可能な`ArrayBuffer`。</li>
+                        <li><strong class="text-stone-700">テーブル:</strong> 通常は関数への参照（例：関数ポインタ用）の、サイズ変更可能な型付き配列。</li>
+                        <li><strong class="text-stone-700">インスタンス:</strong> モジュールとそのランタイム状態（メモリ、テーブル、インポートされた値）のペア。</li>
+                    </ul>
+                    <p class="mt-3 text-stone-600">JavaScriptはWasmのダウンロード、コンパイル、実行を制御し、JS関数とWasm関数のシームレスな相互作用を可能にします。</p>
+                </div>
+            </div>
+
+            <div class="card mb-8">
+                <h2 class="card-title">WebAssemblyの主要な設計目標</h2>
+                <div class="grid sm:grid-cols-3 gap-4">
+                    <div>
+                        <h3 class="font-semibold text-sky-600 mb-1">🚀 高速なセマンティクス</h3>
+                        <p class="text-sm text-stone-600">コンパクトなバイナリ形式とブラウザでの効率的なAOT/JITコンパイルを使用して、ネイティブに近い速度でコードを実行します。</p>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold text-sky-600 mb-1">🛡️ 安全な実行</h3>
+                        <p class="text-sm text-stone-600">メモリ安全なサンドボックス環境で実行されます。外部とのやり取りはJavaScriptを介して行われます。</p>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold text-sky-600 mb-1">🌍 移植性と独立性</h3>
+                        <p class="text-sm text-stone-600">ハードウェア、言語、プラットフォームに依存しません。C++、RustなどがブラウザやOS間で一貫して実行できます。</p>
+                    </div>
+                </div>
+            </div>
+            <p class="text-md text-stone-700 mb-6 text-center max-w-3xl mx-auto">
+                これらの基礎を理解することは、Wasmのパフォーマンスへの影響と、iOSからのような既存のC++アプリケーションをWebに移植する可能性を評価する上で重要です。以下のセクションでは、パフォーマンスベンチマーク、最適化技術、および実世界のアプリケーションについて詳しく説明します。
+            </p>
+        </section>
+
+        <section id="performance" class="content-section">
+            <h1 class="text-3xl sm:text-4xl font-bold text-sky-700 mb-6 text-center">パフォーマンス詳細: Wasm vs. ネイティブiOS</h1>
+            <p class="text-lg text-stone-700 mb-8 text-center max-w-3xl mx-auto">
+                開発者にとって重要な問題は、特に既存のC++ iOSアプリケーションの移植を検討する場合、WebAssemblyのパフォーマンスがネイティブ実行と比較してどうかということです。このセクションでは、ベンチマーク結果を示し、Wasmの速度に影響を与える要因について説明します。
+            </p>
+            <div class="card mb-8">
+                <h2 class="card-title text-center">Wasm実行速度 vs. ネイティブ (C++ on ARM64)</h2>
+                <p class="text-stone-600 mb-4 text-center">大規模なC++アプリケーション向けのSPEC CPUベンチマークに基づいています:</p>
+                <div class="chart-container mb-6">
+                    <canvas id="performanceChart"></canvas>
+                </div>
+                <div class="text-sm text-stone-500 text-center mb-4">データは研究結果に基づいています（例：Wasmはネイティブと比較してChromeで平均1.55倍、Firefoxで平均1.45倍遅い）。</div>
+                <div class="grid md:grid-cols-2 gap-4 text-center">
+                    <div>
+                        <p class="text-2xl font-bold text-sky-600">約1.55倍 遅い</p>
+                        <p class="text-stone-600">Chromeでの平均</p>
+                    </div>
+                    <div>
+                        <p class="text-2xl font-bold text-sky-600">約1.45倍 遅い</p>
+                        <p class="text-stone-600">Firefoxでの平均</p>
+                    </div>
+                </div>
+                <p class="text-stone-600 mt-4 text-center">特定のベンチマークでは、ピーク時の遅延は<strong>2.0倍～2.5倍</strong>に達することがあります。これはWasmモジュールの実行に関するものであり、JS相互運用やDOM操作のオーバーヘッドは含まれていないことに注意してください。</p>
+            </div>
+
+            <div class="card mb-8">
+                <h2 class="card-title">なぜパフォーマンスに差があるのか？</h2>
+                <p class="text-stone-600 mb-4">Wasmが高度に最適化されたネイティブコードよりも遅く実行される要因はいくつかあります:</p>
+                <ul class="list-disc list-inside text-stone-600 space-y-2">
+                    <li><strong>ロード/ストア命令の増加:</strong> Wasmコンパイルされたコードは、ブラウザJITによるレジスタ割り当ての効率が低いことや、すべてのCPUアドレッシングモードを活用できない制限により、より多くのメモリアクセス命令を実行することがよくあります。</li>
+                    <li><strong>分岐命令の増加:</strong> Wasmの設計に固有の動的な安全チェック（例：スタックオーバーフロー、関数テーブルのインデックス作成）により、分岐命令が追加されます。</li>
+                    <li><strong>L1命令キャッシュミス:</strong> 命令フットプリントが大きいと、L1命令キャッシュミスが増加する可能性があります。</li>
+                </ul>
+            </div>
+
+            <div class="card">
+                <h2 class="card-title">Wasmパフォーマンスに影響を与える要因</h2>
+                <p class="text-stone-600 mb-4">実際に経験する速度は、以下に基づいて変化する可能性があります:</p>
+                <ul class="list-disc list-inside text-stone-600 space-y-2">
+                    <li><strong>ブラウザエンジンとJITコンパイラ:</strong> V8 (Chrome)、SpiderMonkey (Firefox)、JavaScriptCore (Safari) は、異なるWasmコンパイラと最適化戦略を持っています。</li>
+                    <li><strong>固有のプラットフォーム制約:</strong> 動的な安全チェックはセキュリティ上避けられません。</li>
+                    <li><strong>予約済みレジスタ:</strong> ブラウザは一部のハードウェアレジスタを予約しており、Wasmのレジスタプレッシャーが増加する可能性があります。</li>
+                    <li><strong>コードサイズと最適化レベル:</strong> ダウンロード、起動、実行速度に影響します。</li>
+                    <li><strong>JavaScript相互運用オーバーヘッド:</strong> JSとWasm間の呼び出し、特に複雑なデータの場合、データマーシャリングのためにコストがかかる可能性があります。</li>
+                </ul>
+                <p class="mt-3 text-stone-600">ギャップがあるにもかかわらず、Wasmは計算量の多いタスクにおいてJavaScript (asm.js) よりも大幅に優れています。重要なのは、これらの要因を理解し、それに応じて最適化することです。これについては次のセクションで説明します。</p>
+            </div>
+        </section>
+
+        <section id="optimization" class="content-section">
+            <h1 class="text-3xl sm:text-4xl font-bold text-sky-700 mb-6 text-center">WebAssembly向けC++の最適化</h1>
+            <p class="text-lg text-stone-700 mb-8 text-center max-w-3xl mx-auto">
+                パフォーマンスのギャップを埋め、応答性の高いユーザーエクスペリエンスを確保するためには、WebAssemblyターゲット向けにC++コードベースを綿密に最適化することが不可欠です。これには、Emscriptenのようなツールを効果的に使用し、さまざまな最適化手法を適用することが含まれます。
+            </p>
+
+            <div class="space-y-4">
+                <div class="accordion-item">
+                    <button class="accordion-button">
+                        <span>Emscriptenツールチェインとコンパイラフラグ</span>
+                        <span class="plus-minus-icon transform transition-transform duration-300">&#x2795;</span>
+                    </button>
+                    <div class="accordion-content">
+                        <p class="text-stone-600 mb-2">Emscriptenは、C/C++からWasmへの主要なツールチェインです。主要な最適化フラグには以下が含まれます:</p>
+                        <ul class="list-disc list-inside text-stone-600 space-y-1">
+                            <li><strong><code>-O1, -O2, -O3</code>:</strong> 最適化レベルの向上。<code>-O3</code>は速度に関して最も積極的です。</li>
+                            <li><strong><code>-Os, -Oz</code>:</strong> コードサイズを最適化します。これはロード時間に不可欠です。</li>
+                            <li><strong><code>-flto</code> (リンク時最適化):</strong> コンパイル単位全体で最適化し、より小さく/高速なコードを生成します。</li>
+                            <li><strong><code>--closure 1</code>:</strong> Google Closure Compilerを使用してJSグルーコードを最小化します。</li>
+                        </ul>
+                        <p class="text-stone-600 mt-2">リリースビルドでは、<code>-O3</code>、<code>-Os</code>、または<code>-Oz</code>を試して、最適なパフォーマンス/サイズのトレードオフを見つけてください。</p>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <button class="accordion-button">
+                        <span>コードサイズの削減</span>
+                        <span class="plus-minus-icon transform transition-transform duration-300">&#x2795;</span>
+                    </button>
+                    <div class="accordion-content">
+                        <p class="text-stone-600 mb-2">WasmモジュールとJSグルーコードのサイズを最小限に抑えることは、ダウンロードと起動を高速化するために不可欠です:</p>
+                        <ul class="list-disc list-inside text-stone-600 space-y-1">
+                            <li><strong>デバッグ情報の除去:</strong> 本番環境では<code>-g</code>なしでコンパイルします。</li>
+                            <li><strong>デッドコード除去 (DCE):</strong> 最適化フラグとLTOによって有効になります。Emscriptenの「meta-dce」も役立ちます。</li>
+                            <li><strong><code>wasm-opt</code>ツール:</strong> Binaryenの一部で、コンパイル後に実行し（例：<code>wasm-opt -O3</code>）、Wasm固有の最適化を行います。</li>
+                            <li><strong>未使用機能の無効化:</strong> 例えば、ファイルアクセスが不要な場合は<code>-sFILESYSTEM=0</code>。<code>ENVIRONMENT=web</code>を指定します。</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <button class="accordion-button">
+                        <span>ロード時間の最適化</span>
+                        <span class="plus-minus-icon transform transition-transform duration-300">&#x2795;</span>
+                    </button>
+                    <div class="accordion-content">
+                        <p class="text-stone-600 mb-2">Wasmアプリがインタラクティブになるまでの時間を改善します:</p>
+                        <ul class="list-disc list-inside text-stone-600 space-y-1">
+                            <li><strong>ストリーミングコンパイル/インスタンス化:</strong> <code>WebAssembly.instantiateStreaming()</code>を使用して、ダウンロード中にコンパイルします。</li>
+                            <li><strong>HTTPキャッシング:</strong> <code>.wasm</code>ファイルに適切な<code>Cache-Control</code>ヘッダーを使用します。</li>
+                            <li><strong>コンパイル済みモジュールのキャッシュ:</strong> コンパイル済みの<code>WebAssembly.Module</code>オブジェクトをIndexedDBに保存して、その後のロードを高速化します。</li>
+                            <li><strong>コード分割と遅延ロード:</strong> 大規模なアプリの場合、Wasmをチャンクに分割し、オンデマンドでロードします。</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="accordion-item">
+                    <button class="accordion-button">
+                        <span>メモリ管理とJS相互運用</span>
+                        <span class="plus-minus-icon transform transition-transform duration-300">&#x2795;</span>
+                    </button>
+                    <div class="accordion-content">
+                        <p class="text-stone-600 mb-2">C++の手動メモリ管理は、Wasmの線形メモリ内で存続します。JS-Wasm境界に注意してください:</p>
+                        <ul class="list-disc list-inside text-stone-600 space-y-1">
+                            <li>境界を越えるデータ転送を最小限に抑えます。データをコピーするか、明確な所有権プロトコルを確立します。</li>
+                            <li>より安全なJS-Wasm相互作用のためにEmbindまたはWebIDL Binderを使用します。</li>
+                            <li>WasmメモリへのJSビュー（例：<code>Uint8Array</code>）には注意してください。</li>
+                            <li>デバッグにはEmscriptenのAddressSanitizer（<code>-fsanitize=address</code>）とLeakSanitizerを使用します。</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <button class="accordion-button">
+                        <span>WebGL最適化 (該当する場合)</span>
+                        <span class="plus-minus-icon transform transition-transform duration-300">&#x2795;</span>
+                    </button>
+                    <div class="accordion-content">
+                        <p class="text-stone-600 mb-2">OpenGL ES (EmscriptenによってWebGLにマッピング) を使用する場合:</p>
+                        <ul class="list-disc list-inside text-stone-600 space-y-1">
+                            <li>GL呼び出しを減らします（バッチ処理、インスタンス化、状態変更の最小化）。</li>
+                            <li>C++でGL状態をキャッシュします。</li>
+                            <li>レンダリング時のGPU-CPU同期ポイント（例：<code>glGetError()</code>、<code>glReadPixels()</code>）を避けます。</li>
+                            <li>頂点配列オブジェクト (VAO) を使用します。</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <p class="text-md text-stone-700 mt-8 text-center max-w-3xl mx-auto">
+                これらの戦略を適用することで、C++ WebAssemblyアプリケーションのパフォーマンスを大幅に向上させ、ロード時間を短縮し、ユーザーを待たせないエクスペリエンスを目指すことができます。
+            </p>
+        </section>
+
+        <section id="future" class="content-section">
+            <h1 class="text-3xl sm:text-4xl font-bold text-sky-700 mb-6 text-center">WebAssemblyの未来: 新機能</h1>
+            <p class="text-lg text-stone-700 mb-8 text-center max-w-3xl mx-auto">
+                WebAssemblyは進化し続ける標準です。特にC++アプリケーションのパフォーマンスをさらに向上させることを約束する新機能が継続的に開発されています。このセクションでは、主要な新機能とその潜在的な影響に焦点を当てます。
+            </p>
+            <div class="table-container overflow-x-auto card">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>機能</th>
+                            <th>ステータス (一般的な傾向)</th>
+                            <th>C++アプリへの潜在的な利点</th>
+                            <th>主要な考慮事項</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-stone-200">
+                        <tr>
+                            <td class="font-semibold text-sky-600">SIMD (単一命令複数データ)</td>
+                            <td>標準化済み (128ビット); Relaxed SIMD が進行中</td>
+                            <td>データ並列計算（ベクトル演算、画像/信号処理、物理演算）の大幅な高速化。</td>
+                            <td>ワークロードのベクトル化可能性とコンパイラの自動ベクトル化に依存。ブラウザエンジンの実装品質が鍵。</td>
+                        </tr>
+                        <tr>
+                            <td class="font-semibold text-sky-600">スレッド</td>
+                            <td>標準化済み (SharedArrayBuffer と Atomics ベース)</td>
+                            <td>計算集約型タスクのために、マルチコアCPUでの真の共有メモリ並列処理を可能にする。</td>
+                            <td>WasmスレッドはWeb Workerにマッピングされる。C++スレッドロジックの慎重な移植が必要。同期オーバーヘッドの可能性。</td>
+                        </tr>
+                        <tr>
+                            <td class="font-semibold text-sky-600">ガベージコレクション (GC)</td>
+                            <td>標準化済み</td>
+                            <td>主にマネージド言語に利点がある。間接的には、GC付きJSオブジェクトや他のWasm GCモジュールとの相互運用が容易になる。</td>
+                            <td>C++の手動メモリ管理には直接使用されない。</td>
+                        </tr>
+                        <tr>
+                            <td class="font-semibold text-sky-600">コンポーネントモデル</td>
+                            <td>提案フェーズ (WASI 0.2 は WIT を使用)</td>
+                            <td>複雑なデータ型（文字列、構造体）に対するJS-Wasm相互運用オーバーヘッドを削減し、速度と開発者エクスペリエンスを向上させる。</td>
+                            <td>まだ進化中。ブラウザのサポートは将来。ツールチェインの採用が必要。</td>
+                        </tr>
+                        <tr>
+                            <td class="font-semibold text-sky-600">Memory64</td>
+                            <td>標準化済み、利用可能</td>
+                            <td>4GBを超えるメモリのアドレッシングを可能にし、非常に大きなデータセットに不可欠。</td>
+                            <td>エンジンが64ビットアクセスに完全に最適化されていない場合、パフォーマンスペナルティが発生する可能性がある。必要な場合に使用。</td>
+                        </tr>
+                         <tr>
+                            <td class="font-semibold text-sky-600">例外処理</td>
+                            <td>標準化済み</td>
+                            <td>Wasmでのより自然なエラー処理が可能になり、JS例外と相互運用できる。</td>
+                            <td>コード構造と堅牢性を向上させる。</td>
+                        </tr>
+                        <tr>
+                            <td class="font-semibold text-sky-600">末尾呼び出し</td>
+                            <td>標準化済み</td>
+                            <td>特定の再帰呼び出しを最適化し、スタックの増加を回避する。</td>
+                            <td>特定のアルゴリズムや関数型パターンに有用。</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-md text-stone-700 mt-8 text-center max-w-3xl mx-auto">
+                これらの進歩は、Wasmの機能をネイティブパフォーマンスに近づけています。SIMDやスレッドのような機能は計算のボトルネックに直接対処でき、コンポーネントモデルはJS-Wasm通信の合理化を目指しています。これらの利点を実現するためには、継続的なブラウザエンジンの改善も重要です。
+            </p>
+        </section>
+
+        <section id="realworld" class="content-section">
+            <h1 class="text-3xl sm:text-4xl font-bold text-sky-700 mb-6 text-center">実世界でのWebAssembly</h1>
+            <p class="text-lg text-stone-700 mb-8 text-center max-w-3xl mx-auto">
+                理論的なベンチマークも重要ですが、実世界のアプリケーションはWebAssemblyの実用的な影響を示しています。多くの複雑なC++アプリケーションがWasmに正常に移植され、ブラウザでの要求の厳しいタスクに対するその実行可能性を実証しています。
+            </p>
+
+            <div class="card mb-8">
+                <h2 class="card-title">Wasmに移植された著名なC++アプリケーション</h2>
+                <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="p-4 bg-stone-50 rounded-md shadow">
+                        <h3 class="font-semibold text-sky-600">Figma</h3>
+                        <p class="text-sm text-stone-600">共同デザインツールは、C++レンダリングエンジンにWasmを使用し、高性能なベクターグラフィックスを実現しています。</p>
+                    </div>
+                    <div class="p-4 bg-stone-50 rounded-md shadow">
+                        <h3 class="font-semibold text-sky-600">AutoCAD</h3>
+                        <p class="text-sm text-stone-600">Autodeskは、主力CADソフトウェア（30年以上のC++コード）をWebアクセシビリティのためにWasmに移植しました。</p>
+                    </div>
+                    <div class="p-4 bg-stone-50 rounded-md shadow">
+                        <h3 class="font-semibold text-sky-600">Google Earth</h3>
+                        <p class="text-sm text-stone-600">Web版は、豊富な3D地理空間データをレンダリングするためにWasmを使用しています。</p>
+                    </div>
+                    <div class="p-4 bg-stone-50 rounded-md shadow">
+                        <h3 class="font-semibold text-sky-600">ゲームエンジン</h3>
+                        <p class="text-sm text-stone-600">UnityとUnreal EngineはWasmをサポートし、複雑なC++ゲームをWebにもたらしています。</p>
+                    </div>
+                    <div class="p-4 bg-stone-50 rounded-md shadow">
+                        <h3 class="font-semibold text-sky-600">DRS Software CPQ</h3>
+                        <p class="text-sm text-stone-600">医療技術企業が、20万行以上のC++ CPQアプリを移植し、開発効率を向上させました。</p>
+                    </div>
+                     <div class="p-4 bg-stone-50 rounded-md shadow">
+                        <h3 class="font-semibold text-sky-600">devPulse Vector Graphics</h3>
+                        <p class="text-sm text-stone-600">1500万行以上のC++デザインアプリがWasmに移行され、Web用にコアエンジンを再利用しています。</p>
+                    </div>
+                </div>
+                 <p class="text-stone-600 mt-4">これらの例は、Wasmが大規模で成熟したC++コードベースを処理でき、多くの場合、コアロジックで「ネイティブに近い」パフォーマンスを達成し、既存のコードを再利用することで大幅な開発コスト削減を実現できることを示しています。</p>
+            </div>
+
+            <div class="grid md:grid-cols-2 gap-6">
+                <div class="card">
+                    <h2 class="card-title">移植における一般的な課題</h2>
+                    <ul class="list-disc list-inside text-stone-600 space-y-2">
+                        <li><strong>限られたシステムリソースアクセス:</strong> Wasmはサンドボックスで実行されるため、OS依存のC++コード（例：ファイルI/O、ネットワーキング）はリファクタリングが必要です。</li>
+                        <li><strong>UIの再構築:</strong> ネイティブUIフレームワーク（Qt、Cocoa）は変換されません。Web UI（HTML、CSS、JS）を構築する必要があります。</li>
+                        <li><strong>マルチスレッドの適応:</strong> ネイティブスレッドはWasmスレッド（Web Worker）とは異なり、スレッドロジックの変更が必要です。</li>
+                        <li><strong>互換性のない依存関係:</strong> 一部のサードパーティC++ライブラリは、移植または置換が必要になる場合があります。</li>
+                        <li><strong>ブラウザサポートのばらつき:</strong> 高度なWasm機能は、ブラウザ間でサポートが一貫していない場合があります。</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h2 class="card-title">デバッグとツール</h2>
+                    <p class="text-stone-600 mb-2">効果的なツールは不可欠です:</p>
+                    <ul class="list-disc list-inside text-stone-600 space-y-2">
+                        <li><strong>ブラウザ開発者ツール:</strong> Chrome DevToolsとFirefox Developer Toolsは、Wasmデバッグ（ブレークポイント、メモリ検査、Emscriptenの<code>-g4</code>によるソースマップ）を提供します。</li>
+                        <li><strong>Emscripten Sanitizers:</strong> AddressSanitizer (ASan) とLeakSanitizer (LSan) は、C++ Wasmコードのメモリエラーの発見に役立ちます。</li>
+                        <li><strong>WebAssemblyテキスト形式 (`.wat`):</strong> <code>.wasm</code>を人間が読める<code>.wat</code>に変換して、低レベルの検査を行います。</li>
+                    </ul>
+                    <p class="text-stone-600 mt-2">成熟しつつありますが、Wasmのデバッグ、特にJS-Wasm境界の問題は依然として困難な場合があります。継続的な改善により、開発者エクスペリエンスが向上しています。</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="takeaways" class="content-section">
+            <h1 class="text-3xl sm:text-4xl font-bold text-sky-700 mb-6 text-center">主要なポイントと推奨事項</h1>
+            <p class="text-lg text-stone-700 mb-8 text-center max-w-3xl mx-auto">
+                C++ iOSアプリケーションをWebAssemblyに移植することを検討する場合、現実的なパフォーマンス期待値を持ち、確固たる最適化戦略を立てることが不可欠です。ユーザーの待機時間を最小限に抑えるために、何を期待すべきか、どのようにプロセスに取り組むべきかの概要を以下に示します。
+            </p>
+
+            <div class="card mb-8">
+                <h2 class="card-title">要約されたパフォーマンス期待値</h2>
+                <p class="text-stone-600 mb-3">WasmにコンパイルされたコアC++ロジックは、平均してネイティブiOS (ARM64) 実行よりも<strong>約1.45倍から1.55倍遅く</strong>なると予想されます。これには以下は含まれません:</p>
+                <ul class="list-disc list-inside text-stone-600 space-y-1 mb-3">
+                    <li>JavaScript相互運用オーバーヘッド (大きな影響を与える可能性があります)。</li>
+                    <li>適切なワークロードに対するWasm SIMD/スレッドからの潜在的なゲイン。</li>
+                    <li>初期アプリケーションロード時間 (モジュールサイズと最適化に依存)。</li>
+                </ul>
+                <p class="text-stone-600">全体的な体感速度は、Wasmの実行、JSのパフォーマンス、およびJS-Wasm通信効率の組み合わせです。すべての場合において、高度に最適化されたネイティブアプリと完全に一致する可能性は低いです。</p>
+            </div>
+
+            <div class="grid md:grid-cols-2 gap-6 mb-8">
+                <div class="card">
+                    <h2 class="card-title">iOSアプリにWasmが適しているのはいつか？</h2>
+                    <ul class="list-disc list-inside text-stone-600 space-y-2">
+                        <li><strong>計算集約度:</strong> コアC++ロジックが要求が厳しく、純粋なJSでは遅すぎる場合。</li>
+                        <li><strong>パフォーマンス許容度:</strong> コアロジックで約40～60%の速度低下（最適化やUXで相殺される可能性がある）が許容できる場合。</li>
+                        <li><strong>開発効率:</strong> C++を移植することで、完全なWeb書き換えよりも大幅な時間/コストを節約でき、パフォーマンスがニーズを満たす場合。</li>
+                    </ul>
+                    <p class="text-stone-600 mt-2"><strong>適していない場合:</strong> 絶対的なベアメタル速度が譲れない場合、プライベートiOS APIへの依存度が高い場合、またはC++コードがネイティブUIと密接に結合しすぎている場合。</p>
+                </div>
+
+                <div class="card">
+                    <h2 class="card-title">パフォーマンスを最大化する戦略</h2>
+                    <ol class="list-decimal list-inside text-stone-600 space-y-2">
+                        <li><strong>徹底的なプロファイリング:</strong> まず、iOSアプリの重要なC++モジュールを特定します。</li>
+                        <li><strong>積極的なコンパイル最適化:</strong> <code>-O3</code>/<code>-Os</code>、<code>-flto</code>、Closure Compiler、<code>wasm-opt</code>を使用します。</li>
+                        <li><strong>ロード時間削減の優先:</strong> 最小のバンドル、ストリーミングインスタンス化、キャッシング。コード分割を検討します。</li>
+                        <li><strong>JS-Wasm相互運用の最小化と最適化:</strong> 呼び出し頻度を減らし、データ転送をバッチ処理します。コンポーネントモデルの進捗に注目します。</li>
+                        <li><strong>SIMD/スレッドの賢明な活用:</strong> 適切な並列化可能なアルゴリズムに。徹底的にテストします。</li>
+                        <li><strong>反復的な移植とベンチマーク:</strong> 小さく始め、ベンチマークを取り、その後拡張します。ハイブリッドJS/Wasmアプリは一般的です。</li>
+                        <li><strong>ユーザー期待値の管理とUXデザイン:</strong> 体感パフォーマンスを向上させるために、非同期操作、プログレスインジケーターを使用します。</li>
+                    </ol>
+                </div>
+            </div>
+            
+            <div class="card">
+                 <h2 class="card-title text-center">最後に</h2>
+                 <p class="text-stone-600 text-center">
+                    WebAssemblyは、Web上で複雑なC++アプリケーションを可能にする、成熟しつつある革新的な技術です。iOSアプリを移植するには、コード再利用による開発効率と、絶対的なネイティブパフォーマンスの達成というトレードオフが伴います。ギャップは存在しますが、戦略的な最適化によって管理可能であることが多く、Wasmの新機能によって縮小される可能性があります。成功は、アプリのニーズ、C++コードベースを理解し、Web固有の適応に取り組むことにかかっています。
+                 </p>
+            </div>
+        </section>
+    </main>
+
+    <footer class="text-center py-8 text-sm text-stone-500">
+        <p>インタラクティブレポートは、「C++ WebアプリケーションのためのWebAssemblyパフォーマンス評価」に基づいて生成されました。</p>
+        <p>&copy; 2025 Wasm Insights Explorer</p>
+    </footer>
+
+    <script>
+        const navLinks = document.querySelectorAll('.nav-link');
+        const contentSections = document.querySelectorAll('.content-section');
+        const performanceChartCtx = document.getElementById('performanceChart')?.getContext('2d');
+
+        navLinks.forEach(link => {
+            link.addEventListener('click', () => {
+                const sectionId = link.dataset.section;
+
+                navLinks.forEach(nav => nav.classList.remove('active'));
+                link.classList.add('active');
+
+                contentSections.forEach(section => {
+                    if (section.id === sectionId) {
+                        section.classList.add('active');
+                    } else {
+                        section.classList.remove('active');
+                    }
+                });
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+        });
+
+        if (performanceChartCtx) {
+            new Chart(performanceChartCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['ネイティブ iOS (ベースライン)', 'Wasm in Chrome', 'Wasm in Firefox'],
+                    datasets: [{
+                        label: '相対実行時間 (ネイティブ = 1x)',
+                        data: [1, 1.55, 1.45],
+                        backgroundColor: [
+                            'rgba(59, 130, 246, 0.7)', // blue-500
+                            'rgba(239, 68, 68, 0.7)',  // red-500
+                            'rgba(249, 115, 22, 0.7)'  // orange-500
+                        ],
+                        borderColor: [
+                            'rgba(59, 130, 246, 1)',
+                            'rgba(239, 68, 68, 1)',
+                            'rgba(249, 115, 22, 1)'
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: '相対実行時間 (低いほど高速)',
+                                font: { size: 14 }
+                            }
+                        },
+                        y: {
+                             ticks: {
+                                font: { size: 12 }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.x !== null) {
+                                        if (context.label === 'ネイティブ iOS (ベースライン)') {
+                                            label += context.parsed.x + 'x (ベースライン)';
+                                        } else {
+                                            label += 'ネイティブより' + context.parsed.x + 'x 遅い';
+                                        }
+                                    }
+                                    return label;
+                                }
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: '平均Wasm遅延 vs. ネイティブC++',
+                            font: { size: 16, weight: 'bold' },
+                            padding: { top: 10, bottom: 20 }
+                        }
+                    }
+                }
+            });
+        }
+
+        const accordionItems = document.querySelectorAll('.accordion-item');
+        accordionItems.forEach(item => {
+            const button = item.querySelector('.accordion-button');
+            const content = item.querySelector('.accordion-content');
+            const icon = item.querySelector('.plus-minus-icon');
+
+            button.addEventListener('click', () => {
+                const isExpanded = content.style.display === 'block';
+                content.style.display = isExpanded ? 'none' : 'block';
+                icon.innerHTML = isExpanded ? '&#x2795;' : '&#x2796;'; // プラス/マイナス アイコン
+                icon.classList.toggle('rotate-180', !isExpanded);
+            });
+        });
+
+    </script>
+</body>
+</html>

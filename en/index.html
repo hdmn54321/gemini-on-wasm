@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive WebAssembly Performance Analysis</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Visualization & Content Choices:
+        - Report Info: Wasm vs. Native performance (1.45x-1.55x slower). Goal: Compare. Viz/Presentation: Bar Chart (Chart.js). Interaction: Tooltips. Justification: Clear visual comparison of slowdown. Library: Chart.js.
+        - Report Info: Optimization techniques. Goal: Inform/Organize. Viz/Presentation: Clickable cards/accordions for categories. Interaction: Expand/collapse details. Justification: Organizes dense info, user-controlled detail. Library/Method: HTML/CSS/JS.
+        - Report Info: Emerging Wasm features. Goal: Inform/Organize. Viz/Presentation: Interactive table or cards. Interaction: Click to expand details. Justification: Structured overview of future tech. Library/Method: HTML/CSS/JS.
+        - Report Info: Core Wasm concepts, case studies, challenges, recommendations. Goal: Inform. Viz/Presentation: Text summaries, lists, simple HTML/CSS diagrams. Interaction: Minimal, focus on readability. Justification: Direct presentation of qualitative info. Library/Method: HTML/CSS.
+        CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .content-section {
+            display: none;
+        }
+        .content-section.active {
+            display: block;
+        }
+        .nav-link {
+            @apply px-5 py-3 text-base font-semibold text-stone-600 hover:bg-sky-100 hover:text-sky-700 rounded-t-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-sky-500;
+        }
+        .nav-link.active {
+            @apply bg-sky-600 text-white border-b-4 border-sky-800 hover:bg-sky-700;
+        }
+        .card {
+            @apply bg-white p-6 rounded-lg shadow-lg hover:shadow-xl transition-shadow duration-300;
+        }
+        .card-title {
+            @apply text-xl font-semibold text-sky-700 mb-3;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 700px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 350px;
+            max-height: 400px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 400px;
+            }
+        }
+        .accordion-button {
+            @apply w-full text-left px-4 py-3 bg-stone-200 hover:bg-stone-300 rounded-t-md text-stone-800 font-semibold transition-colors duration-150 flex justify-between items-center;
+        }
+        .accordion-content {
+            @apply px-4 py-3 border border-t-0 border-stone-300 rounded-b-md bg-white;
+            display: none;
+        }
+        .table-container table {
+            @apply min-w-full divide-y divide-stone-300;
+        }
+        .table-container th {
+            @apply px-4 py-3.5 text-left text-sm font-semibold text-stone-900 bg-stone-100;
+        }
+        .table-container td {
+            @apply whitespace-nowrap px-4 py-3 text-sm text-stone-700;
+        }
+        .table-container tbody tr:nth-child(even) {
+            @apply bg-stone-50;
+        }
+        .tooltip {
+            @apply absolute z-10 invisible px-3 py-2 text-sm font-medium text-white bg-stone-900 rounded-md shadow-sm opacity-0 transition-opacity duration-300;
+        }
+        .has-tooltip:hover .tooltip {
+            @apply visible opacity-100;
+        }
+    </style>
+</head>
+<body class="bg-stone-100 text-stone-800">
+  <nav>
+    <a href="../ja/index.html">🇯🇵 日本語</a> | 
+    <a href="../en/index.html">🇺🇸 English</a>
+  </nav>
+    <header class="bg-white shadow-md sticky top-0 z-50">
+        <nav class="container mx-auto px-4 sm:px-6 lg:px-8 py-2 flex flex-wrap justify-center items-center space-x-1 sm:space-x-2">
+            <button data-section="overview" class="nav-link active">Overview</button>
+            <button data-section="performance" class="nav-link">Performance Deep Dive</button>
+            <button data-section="optimization" class="nav-link">Optimization</button>
+            <button data-section="future" class="nav-link">Future of Wasm</button>
+            <button data-section="realworld" class="nav-link">Real-World</button>
+            <button data-section="takeaways" class="nav-link">Key Takeaways</button>
+        </nav>
+    </header>
+
+    <main class="container mx-auto p-4 sm:p-6 lg:p-8">
+        <section id="overview" class="content-section active">
+            <h1 class="text-3xl sm:text-4xl font-bold text-sky-700 mb-6 text-center">WebAssembly: A Performance Path for C++ on the Web</h1>
+            <p class="text-lg text-stone-700 mb-8 text-center max-w-3xl mx-auto">
+                This interactive report explores WebAssembly (Wasm) as a high-performance compilation target for C++ applications on the web, comparing its speed and capabilities against native iOS execution. Discover Wasm's core concepts, performance characteristics, optimization strategies, and future potential.
+            </p>
+
+            <div class="grid md:grid-cols-2 gap-6 mb-8">
+                <div class="card">
+                    <h2 class="card-title">What is WebAssembly?</h2>
+                    <p class="text-stone-600 mb-4">WebAssembly (Wasm) is a low-level, assembly-like language with a compact binary format. It runs in web browsers, enabling near-native performance for computationally intensive tasks. Wasm complements JavaScript, allowing languages like C++ and Rust to be compiled for the web.</p>
+                    <p class="text-stone-600">Its primary goals are speed, safety, and portability, aiming to bring complex desktop-class applications to the web efficiently.</p>
+                </div>
+                <div class="card">
+                    <h2 class="card-title">Core Wasm Concepts</h2>
+                    <ul class="list-disc list-inside text-stone-600 space-y-2">
+                        <li><strong class="text-stone-700">Module:</strong> The compiled Wasm binary, stateless and shareable.</li>
+                        <li><strong class="text-stone-700">Memory:</strong> A resizable `ArrayBuffer` representing Wasm's linear memory space.</li>
+                        <li><strong class="text-stone-700">Table:</strong> A resizable typed array of references, typically to functions (e.g., for function pointers).</li>
+                        <li><strong class="text-stone-700">Instance:</strong> A Module paired with its runtime state (Memory, Table, imported values).</li>
+                    </ul>
+                    <p class="mt-3 text-stone-600">JavaScript controls Wasm's download, compilation, and execution, allowing seamless interaction between JS and Wasm functions.</p>
+                </div>
+            </div>
+
+            <div class="card mb-8">
+                <h2 class="card-title">Key Design Goals of WebAssembly</h2>
+                <div class="grid sm:grid-cols-3 gap-4">
+                    <div>
+                        <h3 class="font-semibold text-sky-600 mb-1">🚀 Fast Semantics</h3>
+                        <p class="text-sm text-stone-600">Execute code at near-native speeds using a compact binary format and efficient AOT/JIT compilation in browsers.</p>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold text-sky-600 mb-1">🛡️ Safe Execution</h3>
+                        <p class="text-sm text-stone-600">Runs in a memory-safe, sandboxed environment. Interactions with the outside world are mediated through JavaScript.</p>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold text-sky-600 mb-1">🌍 Portability & Independence</h3>
+                        <p class="text-sm text-stone-600">Hardware, language, and platform-independent. C++, Rust, etc., can run consistently across browsers and OS.</p>
+                    </div>
+                </div>
+            </div>
+            <p class="text-md text-stone-700 mb-6 text-center max-w-3xl mx-auto">
+                Understanding these fundamentals is key to appreciating Wasm's performance implications and its potential for porting existing C++ applications, like those from iOS, to the web. The following sections will delve deeper into performance benchmarks, optimization techniques, and real-world applications.
+            </p>
+        </section>
+
+        <section id="performance" class="content-section">
+            <h1 class="text-3xl sm:text-4xl font-bold text-sky-700 mb-6 text-center">Performance Deep Dive: Wasm vs. Native iOS</h1>
+            <p class="text-lg text-stone-700 mb-8 text-center max-w-3xl mx-auto">
+                A critical question for developers is how WebAssembly performance stacks up against native execution, especially when considering porting an existing C++ iOS application. This section presents benchmark findings and discusses the factors influencing Wasm's speed.
+            </p>
+            <div class="card mb-8">
+                <h2 class="card-title text-center">Wasm Execution Speed vs. Native (C++ on ARM64)</h2>
+                <p class="text-stone-600 mb-4 text-center">Based on SPEC CPU benchmarks for larger C++ applications:</p>
+                <div class="chart-container mb-6">
+                    <canvas id="performanceChart"></canvas>
+                </div>
+                <div class="text-sm text-stone-500 text-center mb-4">Data based on research findings (e.g., Wasm running 1.55x slower in Chrome, 1.45x slower in Firefox on average compared to native).</div>
+                <div class="grid md:grid-cols-2 gap-4 text-center">
+                    <div>
+                        <p class="text-2xl font-bold text-sky-600">~1.55x Slower</p>
+                        <p class="text-stone-600">Average in Chrome</p>
+                    </div>
+                    <div>
+                        <p class="text-2xl font-bold text-sky-600">~1.45x Slower</p>
+                        <p class="text-stone-600">Average in Firefox</p>
+                    </div>
+                </div>
+                <p class="text-stone-600 mt-4 text-center">Peak slowdowns can reach <strong>2.0x - 2.5x</strong> for certain benchmarks. It's important to note this is for the Wasm module execution and doesn't include JS interop or DOM manipulation overhead.</p>
+            </div>
+
+            <div class="card mb-8">
+                <h2 class="card-title">Why the Performance Difference?</h2>
+                <p class="text-stone-600 mb-4">Several factors contribute to Wasm running slower than highly optimized native code:</p>
+                <ul class="list-disc list-inside text-stone-600 space-y-2">
+                    <li><strong>Increased Loads/Stores:</strong> Wasm-compiled code often executes more memory load/store instructions due to less efficient register allocation by browser JITs and limitations in exploiting all CPU addressing modes.</li>
+                    <li><strong>More Branch Instructions:</strong> Dynamic safety checks (e.g., stack overflow, function table indexing) inherent to Wasm's design add branch instructions.</li>
+                    <li><strong>L1 Instruction Cache Misses:</strong> A larger instruction footprint can lead to more L1 instruction cache misses.</li>
+                </ul>
+            </div>
+
+            <div class="card">
+                <h2 class="card-title">Factors Influencing Wasm Performance</h2>
+                <p class="text-stone-600 mb-4">The actual speed you'll experience can vary based on:</p>
+                <ul class="list-disc list-inside text-stone-600 space-y-2">
+                    <li><strong>Browser Engine & JIT Compiler:</strong> V8 (Chrome), SpiderMonkey (Firefox), JavaScriptCore (Safari) have different Wasm compilers and optimization strategies.</li>
+                    <li><strong>Inherent Platform Constraints:</strong> Dynamic safety checks are unavoidable for security.</li>
+                    <li><strong>Reserved Registers:</strong> Browsers reserve some hardware registers, potentially increasing register pressure for Wasm.</li>
+                    <li><strong>Code Size & Optimization Level:</strong> Affects download, startup, and execution speed.</li>
+                    <li><strong>JavaScript Interoperability Overhead:</strong> Calls between JS and Wasm, especially with complex data, can be costly due to data marshalling.</li>
+                </ul>
+                <p class="mt-3 text-stone-600">Despite the gap, Wasm significantly outperforms JavaScript (asm.js) for compute-heavy tasks. The key is to understand these factors and optimize accordingly, which is explored in the next section.</p>
+            </div>
+        </section>
+
+        <section id="optimization" class="content-section">
+            <h1 class="text-3xl sm:text-4xl font-bold text-sky-700 mb-6 text-center">Optimizing C++ for WebAssembly</h1>
+            <p class="text-lg text-stone-700 mb-8 text-center max-w-3xl mx-auto">
+                To bridge the performance gap and ensure a responsive user experience, meticulous optimization of your C++ codebase for the WebAssembly target is crucial. This involves using tools like Emscripten effectively and applying various optimization techniques.
+            </p>
+
+            <div class="space-y-4">
+                <div class="accordion-item">
+                    <button class="accordion-button">
+                        <span>Emscripten Toolchain & Compiler Flags</span>
+                        <span class="plus-minus-icon transform transition-transform duration-300">&#x2795;</span>
+                    </button>
+                    <div class="accordion-content">
+                        <p class="text-stone-600 mb-2">Emscripten is the primary toolchain for C/C++ to Wasm. Key optimization flags include:</p>
+                        <ul class="list-disc list-inside text-stone-600 space-y-1">
+                            <li><strong><code>-O1, -O2, -O3</code>:</strong> Increasing levels of optimization. <code>-O3</code> is most aggressive for speed.</li>
+                            <li><strong><code>-Os, -Oz</code>:</strong> Optimize for code size, crucial for load times.</li>
+                            <li><strong><code>-flto</code> (Link-Time Optimization):</strong> Optimizes across compilation units for smaller/faster code.</li>
+                            <li><strong><code>--closure 1</code>:</strong> Uses Google Closure Compiler to minify JS glue code.</li>
+                        </ul>
+                        <p class="text-stone-600 mt-2">Experiment with <code>-O3</code>, <code>-Os</code>, or <code>-Oz</code> for release builds to find the best performance/size trade-off.</p>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <button class="accordion-button">
+                        <span>Code Size Reduction</span>
+                        <span class="plus-minus-icon transform transition-transform duration-300">&#x2795;</span>
+                    </button>
+                    <div class="accordion-content">
+                        <p class="text-stone-600 mb-2">Minimizing Wasm module and JS glue size is vital for faster downloads and startup:</p>
+                        <ul class="list-disc list-inside text-stone-600 space-y-1">
+                            <li><strong>Strip Debug Info:</strong> Compile without <code>-g</code> for production.</li>
+                            <li><strong>Dead Code Elimination (DCE):</strong> Enabled by optimization flags and LTO. Emscripten's "meta-dce" helps too.</li>
+                            <li><strong><code>wasm-opt</code> Tool:</strong> Part of Binaryen, run post-compilation (e.g., <code>wasm-opt -O3</code>) for Wasm-specific optimizations.</li>
+                            <li><strong>Disable Unused Features:</strong> E.g., <code>-sFILESYSTEM=0</code> if no file access is needed. Specify <code>ENVIRONMENT=web</code>.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <button class="accordion-button">
+                        <span>Load Time Optimization</span>
+                        <span class="plus-minus-icon transform transition-transform duration-300">&#x2795;</span>
+                    </button>
+                    <div class="accordion-content">
+                        <p class="text-stone-600 mb-2">Improve how quickly your Wasm app becomes interactive:</p>
+                        <ul class="list-disc list-inside text-stone-600 space-y-1">
+                            <li><strong>Streaming Compilation/Instantiation:</strong> Use <code>WebAssembly.instantiateStreaming()</code> to compile during download.</li>
+                            <li><strong>HTTP Caching:</strong> Use proper <code>Cache-Control</code> headers for <code>.wasm</code> files.</li>
+                            <li><strong>Cache Compiled Modules:</strong> Store compiled <code>WebAssembly.Module</code> objects in IndexedDB for faster subsequent loads.</li>
+                            <li><strong>Code Splitting & Lazy Loading:</strong> For large apps, split Wasm into chunks and load on demand.</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="accordion-item">
+                    <button class="accordion-button">
+                        <span>Memory Management & JS Interop</span>
+                        <span class="plus-minus-icon transform transition-transform duration-300">&#x2795;</span>
+                    </button>
+                    <div class="accordion-content">
+                        <p class="text-stone-600 mb-2">C++ manual memory management persists in Wasm's linear memory. Be mindful of the JS-Wasm boundary:</p>
+                        <ul class="list-disc list-inside text-stone-600 space-y-1">
+                            <li>Minimize data transfer across the boundary. Copy data or establish clear ownership protocols.</li>
+                            <li>Use Embind or WebIDL Binder for safer JS-Wasm interaction.</li>
+                            <li>Be cautious with JS views (e.g., <code>Uint8Array</code>) into Wasm memory.</li>
+                            <li>Use Emscripten's AddressSanitizer (<code>-fsanitize=address</code>) and LeakSanitizer for debugging.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <button class="accordion-button">
+                        <span>WebGL Optimization (If Applicable)</span>
+                        <span class="plus-minus-icon transform transition-transform duration-300">&#x2795;</span>
+                    </button>
+                    <div class="accordion-content">
+                        <p class="text-stone-600 mb-2">If using OpenGL ES (mapped to WebGL by Emscripten):</p>
+                        <ul class="list-disc list-inside text-stone-600 space-y-1">
+                            <li>Reduce GL calls (batching, instancing, minimize state changes).</li>
+                            <li>Cache GL state in C++.</li>
+                            <li>Avoid GPU-CPU sync points (e.g., <code>glGetError()</code>, <code>glReadPixels()</code> at render time).</li>
+                            <li>Use Vertex Array Objects (VAOs).</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <p class="text-md text-stone-700 mt-8 text-center max-w-3xl mx-auto">
+                By applying these strategies, you can significantly enhance the performance and reduce load times of your C++ WebAssembly application, aiming for an experience that doesn't keep users waiting.
+            </p>
+        </section>
+
+        <section id="future" class="content-section">
+            <h1 class="text-3xl sm:text-4xl font-bold text-sky-700 mb-6 text-center">The Future of WebAssembly: Emerging Features</h1>
+            <p class="text-lg text-stone-700 mb-8 text-center max-w-3xl mx-auto">
+                WebAssembly is an evolving standard. New features are continuously being developed that promise to further enhance performance, especially for C++ applications. This section highlights key emerging capabilities and their potential impact.
+            </p>
+            <div class="table-container overflow-x-auto card">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Feature</th>
+                            <th>Status (General Trend)</th>
+                            <th>Potential Benefit for C++ Apps</th>
+                            <th>Key Considerations</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-stone-200">
+                        <tr>
+                            <td class="font-semibold text-sky-600">SIMD (Single Instruction, Multiple Data)</td>
+                            <td>Standardized (128-bit); Relaxed SIMD advancing</td>
+                            <td>Significant speedup for data-parallel computations (vector math, image/signal processing, physics).</td>
+                            <td>Depends on workload vectorizability & compiler auto-vectorization. Browser engine implementation quality is key.</td>
+                        </tr>
+                        <tr>
+                            <td class="font-semibold text-sky-600">Threads</td>
+                            <td>Standardized (SharedArrayBuffer & Atomics based)</td>
+                            <td>Enables true shared-memory parallelism on multi-core CPUs for compute-bound tasks.</td>
+                            <td>Wasm threads map to Web Workers; requires careful porting of C++ threading logic. Potential for synchronization overhead.</td>
+                        </tr>
+                        <tr>
+                            <td class="font-semibold text-sky-600">Garbage Collection (GC)</td>
+                            <td>Standardized</td>
+                            <td>Primarily benefits managed languages. Indirectly, easier interop with GC'd JS objects or other Wasm GC modules.</td>
+                            <td>Not directly used for C++ manual memory management.</td>
+                        </tr>
+                        <tr>
+                            <td class="font-semibold text-sky-600">Component Model</td>
+                            <td>In Proposal Phase (WASI 0.2 uses WIT)</td>
+                            <td>Reduces JS-Wasm interop overhead for complex data types (strings, structs), improving speed and developer experience.</td>
+                            <td>Still evolving; browser support is future. Requires toolchain adoption.</td>
+                        </tr>
+                        <tr>
+                            <td class="font-semibold text-sky-600">Memory64</td>
+                            <td>Standardized, available</td>
+                            <td>Allows addressing >4GB of memory, crucial for very large datasets.</td>
+                            <td>Can incur performance penalties if engines aren't fully optimized for 64-bit access. Use if necessary.</td>
+                        </tr>
+                         <tr>
+                            <td class="font-semibold text-sky-600">Exception Handling</td>
+                            <td>Standardized</td>
+                            <td>More natural error handling in Wasm, can interoperate with JS exceptions.</td>
+                            <td>Improves code structure and robustness.</td>
+                        </tr>
+                        <tr>
+                            <td class="font-semibold text-sky-600">Tail Calls</td>
+                            <td>Standardized</td>
+                            <td>Optimizes certain recursive calls to avoid stack growth.</td>
+                            <td>Useful for specific algorithms and functional patterns.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-md text-stone-700 mt-8 text-center max-w-3xl mx-auto">
+                These advancements are pushing Wasm's capabilities closer to native performance. Features like SIMD and Threads can directly address computational bottlenecks, while the Component Model aims to streamline JS-Wasm communication. Continuous browser engine improvements are also key to realizing these benefits.
+            </p>
+        </section>
+
+        <section id="realworld" class="content-section">
+            <h1 class="text-3xl sm:text-4xl font-bold text-sky-700 mb-6 text-center">WebAssembly in the Real World</h1>
+            <p class="text-lg text-stone-700 mb-8 text-center max-w-3xl mx-auto">
+                Theoretical benchmarks are one thing; real-world applications showcase WebAssembly's practical impact. Many complex C++ applications have been successfully ported to Wasm, demonstrating its viability for demanding tasks in the browser.
+            </p>
+
+            <div class="card mb-8">
+                <h2 class="card-title">Prominent C++ Applications Ported to Wasm</h2>
+                <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="p-4 bg-stone-50 rounded-md shadow">
+                        <h3 class="font-semibold text-sky-600">Figma</h3>
+                        <p class="text-sm text-stone-600">Collaborative design tool uses Wasm for its C++ rendering engine, achieving high-performance vector graphics.</p>
+                    </div>
+                    <div class="p-4 bg-stone-50 rounded-md shadow">
+                        <h3 class="font-semibold text-sky-600">AutoCAD</h3>
+                        <p class="text-sm text-stone-600">Autodesk ported its flagship CAD software (30+ years of C++ code) to Wasm for web accessibility.</p>
+                    </div>
+                    <div class="p-4 bg-stone-50 rounded-md shadow">
+                        <h3 class="font-semibold text-sky-600">Google Earth</h3>
+                        <p class="text-sm text-stone-600">Web version uses Wasm for rendering rich 3D geospatial data.</p>
+                    </div>
+                    <div class="p-4 bg-stone-50 rounded-md shadow">
+                        <h3 class="font-semibold text-sky-600">Game Engines</h3>
+                        <p class="text-sm text-stone-600">Unity and Unreal Engine support Wasm, bringing complex C++ games to the web.</p>
+                    </div>
+                    <div class="p-4 bg-stone-50 rounded-md shadow">
+                        <h3 class="font-semibold text-sky-600">DRS Software CPQ</h3>
+                        <p class="text-sm text-stone-600">A medical tech company ported its 200k+ LoC C++ CPQ app, gaining development efficiency.</p>
+                    </div>
+                     <div class="p-4 bg-stone-50 rounded-md shadow">
+                        <h3 class="font-semibold text-sky-600">devPulse Vector Graphics</h3>
+                        <p class="text-sm text-stone-600">15M+ LoC C++ design app migrated to Wasm, reusing its core engine for the web.</p>
+                    </div>
+                </div>
+                 <p class="text-stone-600 mt-4">These examples show Wasm can handle large, mature C++ codebases, often achieving "near-native" performance for core logic and significant development cost savings by reusing existing code.</p>
+            </div>
+
+            <div class="grid md:grid-cols-2 gap-6">
+                <div class="card">
+                    <h2 class="card-title">Common Challenges in Porting</h2>
+                    <ul class="list-disc list-inside text-stone-600 space-y-2">
+                        <li><strong>Limited System Resource Access:</strong> Wasm runs in a sandbox; OS-dependent C++ code needs refactoring (e.g., file I/O, networking).</li>
+                        <li><strong>UI Rebuild:</strong> Native UI frameworks (Qt, Cocoa) don't translate. Web UI (HTML, CSS, JS) must be built.</li>
+                        <li><strong>Multithreading Adaptation:</strong> Native threads differ from Wasm threads (Web Workers), requiring changes to threading logic.</li>
+                        <li><strong>Incompatible Dependencies:</strong> Some third-party C++ libraries may need porting or replacement.</li>
+                        <li><strong>Browser Support Variability:</strong> Advanced Wasm features might have inconsistent support across browsers.</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h2 class="card-title">Debugging and Tooling</h2>
+                    <p class="text-stone-600 mb-2">Effective tooling is crucial:</p>
+                    <ul class="list-disc list-inside text-stone-600 space-y-2">
+                        <li><strong>Browser Developer Tools:</strong> Chrome DevTools & Firefox Developer Tools offer Wasm debugging (breakpoints, memory inspection, source maps via Emscripten's <code>-g4</code>).</li>
+                        <li><strong>Emscripten Sanitizers:</strong> AddressSanitizer (ASan) and LeakSanitizer (LSan) help find memory errors in C++ Wasm code.</li>
+                        <li><strong>WebAssembly Text Format (`.wat`):</strong> Convert <code>.wasm</code> to human-readable <code>.wat</code> for low-level inspection.</li>
+                    </ul>
+                    <p class="text-stone-600 mt-2">While maturing, debugging Wasm, especially JS-Wasm boundary issues, can still be challenging. Ongoing improvements are enhancing developer experience.</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="takeaways" class="content-section">
+            <h1 class="text-3xl sm:text-4xl font-bold text-sky-700 mb-6 text-center">Key Takeaways & Recommendations</h1>
+            <p class="text-lg text-stone-700 mb-8 text-center max-w-3xl mx-auto">
+                When considering porting a C++ iOS application to WebAssembly, it's vital to have realistic performance expectations and a solid optimization strategy. Here's a summary of what to expect and how to approach the process to minimize user wait times.
+            </p>
+
+            <div class="card mb-8">
+                <h2 class="card-title">Summarized Performance Expectations</h2>
+                <p class="text-stone-600 mb-3">Core C++ logic compiled to Wasm can be expected to run, on average, <strong>~1.45x to 1.55x slower</strong> than native iOS (ARM64) execution. This baseline doesn't include:</p>
+                <ul class="list-disc list-inside text-stone-600 space-y-1 mb-3">
+                    <li>JavaScript interoperation overhead (can be significant).</li>
+                    <li>Potential gains from Wasm SIMD/Threads for suitable workloads.</li>
+                    <li>Initial application load times (dependent on module size & optimizations).</li>
+                </ul>
+                <p class="text-stone-600">Overall perceived speed is a mix of Wasm execution, JS performance, and JS-Wasm communication efficiency. It's unlikely to perfectly match a hyper-optimized native app in all cases.</p>
+            </div>
+
+            <div class="grid md:grid-cols-2 gap-6 mb-8">
+                <div class="card">
+                    <h2 class="card-title">When is Wasm Viable for Your iOS App?</h2>
+                    <ul class="list-disc list-inside text-stone-600 space-y-2">
+                        <li><strong>Computational Intensity:</strong> If core C++ logic is demanding and would be too slow in pure JS.</li>
+                        <li><strong>Performance Tolerance:</strong> If a ~40-60% slowdown in core logic (potentially offset by optimizations or masked by UX) is acceptable.</li>
+                        <li><strong>Development Efficiency:</strong> If porting C++ saves significant time/cost over a full web rewrite, and performance meets needs.</li>
+                    </ul>
+                    <p class="text-stone-600 mt-2"><strong>Less Viable If:</strong> Absolute bare-metal speed is non-negotiable, heavy reliance on private iOS APIs, or C++ code is too tightly coupled with native UI.</p>
+                </div>
+
+                <div class="card">
+                    <h2 class="card-title">Strategies to Maximize Performance</h2>
+                    <ol class="list-decimal list-inside text-stone-600 space-y-2">
+                        <li><strong>Profile Extensively:</strong> Identify critical C++ modules in your iOS app first.</li>
+                        <li><strong>Aggressive Compilation Optimization:</strong> Use <code>-O3</code>/<code>-Os</code>, <code>-flto</code>, Closure Compiler, <code>wasm-opt</code>.</li>
+                        <li><strong>Prioritize Load Time Reduction:</strong> Smallest bundles, streaming instantiation, caching. Consider code splitting.</li>
+                        <li><strong>Minimize & Optimize JS-Wasm Interop:</strong> Reduce call frequency, batch data transfers. Watch Component Model progress.</li>
+                        <li><strong>Leverage SIMD/Threads Judiciously:</strong> For suitable parallelizable algorithms. Test thoroughly.</li>
+                        <li><strong>Iterative Porting & Benchmarking:</strong> Start small, benchmark, then expand. Hybrid JS/Wasm apps are common.</li>
+                        <li><strong>Manage User Expectations & UX Design:</strong> Use async operations, progress indicators to enhance perceived performance.</li>
+                    </ol>
+                </div>
+            </div>
+            
+            <div class="card">
+                 <h2 class="card-title text-center">Final Thoughts</h2>
+                 <p class="text-stone-600 text-center">
+                    WebAssembly is a maturing, transformative technology enabling complex C++ applications on the web. Porting an iOS app involves a trade-off: development efficiency from code reuse versus achieving absolute native performance. While a gap exists, it's often manageable with strategic optimization and can be narrowed by emerging Wasm features. Success depends on understanding your app's needs, the C++ codebase, and committing to web-specific adaptation.
+                 </p>
+            </div>
+        </section>
+    </main>
+
+    <footer class="text-center py-8 text-sm text-stone-500">
+        <p>Interactive Report generated based on "Evaluating WebAssembly Performance for C++ Web Applications".</p>
+        <p>&copy; 2025 Wasm Insights Explorer</p>
+    </footer>
+
+    <script>
+        const navLinks = document.querySelectorAll('.nav-link');
+        const contentSections = document.querySelectorAll('.content-section');
+        const performanceChartCtx = document.getElementById('performanceChart')?.getContext('2d');
+
+        navLinks.forEach(link => {
+            link.addEventListener('click', () => {
+                const sectionId = link.dataset.section;
+
+                navLinks.forEach(nav => nav.classList.remove('active'));
+                link.classList.add('active');
+
+                contentSections.forEach(section => {
+                    if (section.id === sectionId) {
+                        section.classList.add('active');
+                    } else {
+                        section.classList.remove('active');
+                    }
+                });
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+        });
+
+        if (performanceChartCtx) {
+            new Chart(performanceChartCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['Native iOS (Baseline)', 'Wasm in Chrome', 'Wasm in Firefox'],
+                    datasets: [{
+                        label: 'Relative Execution Time (Native = 1x)',
+                        data: [1, 1.55, 1.45],
+                        backgroundColor: [
+                            'rgba(59, 130, 246, 0.7)', // blue-500
+                            'rgba(239, 68, 68, 0.7)',  // red-500
+                            'rgba(249, 115, 22, 0.7)'  // orange-500
+                        ],
+                        borderColor: [
+                            'rgba(59, 130, 246, 1)',
+                            'rgba(239, 68, 68, 1)',
+                            'rgba(249, 115, 22, 1)'
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Relative Execution Time (Lower is Faster)',
+                                font: { size: 14 }
+                            }
+                        },
+                        y: {
+                             ticks: {
+                                font: { size: 12 }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.x !== null) {
+                                        if (context.label === 'Native iOS (Baseline)') {
+                                            label += context.parsed.x + 'x (Baseline)';
+                                        } else {
+                                            label += context.parsed.x + 'x slower than native';
+                                        }
+                                    }
+                                    return label;
+                                }
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Average Wasm Slowdown vs. Native C++',
+                            font: { size: 16, weight: 'bold' },
+                            padding: { top: 10, bottom: 20 }
+                        }
+                    }
+                }
+            });
+        }
+
+        const accordionItems = document.querySelectorAll('.accordion-item');
+        accordionItems.forEach(item => {
+            const button = item.querySelector('.accordion-button');
+            const content = item.querySelector('.accordion-content');
+            const icon = item.querySelector('.plus-minus-icon');
+
+            button.addEventListener('click', () => {
+                const isExpanded = content.style.display === 'block';
+                content.style.display = isExpanded ? 'none' : 'block';
+                icon.innerHTML = isExpanded ? '&#x2795;' : '&#x2796;';
+                icon.classList.toggle('rotate-180', !isExpanded);
+            });
+        });
+
+    </script>
+</body>
+</html>
